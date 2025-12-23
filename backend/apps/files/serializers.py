@@ -24,3 +24,7 @@ class FinalizeRequestSerializer(serializers.Serializer):
     file_type = serializers.CharField()
     size = serializers.IntegerField()
 
+
+class FileUpdateSerializer(serializers.Serializer):
+    filename = serializers.CharField(required=False, allow_blank=False, max_length=255)
+    metadata = serializers.JSONField(required=False)

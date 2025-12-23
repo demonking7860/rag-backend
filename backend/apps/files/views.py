@@ -7,7 +7,12 @@ from django.db import transaction
 import logging
 
 from .models import FileAsset
-from .serializers import FileAssetSerializer, PresignRequestSerializer, FinalizeRequestSerializer
+from .serializers import (
+    FileAssetSerializer,
+    PresignRequestSerializer,
+    FinalizeRequestSerializer,
+    FileUpdateSerializer,
+)
 from .services import S3Service
 
 logger = logging.getLogger(__name__)
@@ -36,6 +41,31 @@ def list_files(request):
         'page_size': page_size,
         'total_pages': (total + page_size - 1) // page_size,
     })
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_file(request, file_id):
+    """Rename or update metadata for a file (user-scoped)."""
+    file_asset = get_object_or_404(FileAsset, id=file_id, user=request.user)
+
+    serializer = FileUpdateSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+
+    if 'filename' in data:
+        file_asset.filename = data['filename']
+
+    if 'metadata' in data:
+        # Merge metadata while keeping existing keys
+        current_meta = file_asset.metadata or {}
+        current_meta.update(data['metadata'] or {})
+        file_asset.metadata = current_meta
+
+    file_asset.save()
+    return Response(FileAssetSerializer(file_asset).data, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])

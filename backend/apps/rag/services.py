@@ -41,22 +41,35 @@ def extract_text_from_s3(s3_key: str, file_type: str) -> str:
 
 
 def extract_text_from_image(s3_key: str) -> Tuple[str, str]:
-    """Extract text from image using Claude 3.5 Sonnet Vision."""
-    try:
-        bedrock_client = boto3.client('bedrock-runtime', region_name=settings.BEDROCK_REGION)
-    except Exception as e:
-        logger.error(f"Failed to initialize Bedrock client: {str(e)}")
-        return "[Image processing failed: Bedrock not configured]", 'image_vision_failed'
+    """Extract text from image using OpenRouter Vision API (GPT-4o or Claude)."""
+    import requests
+    
+    # Check for OpenRouter API key
+    openrouter_api_key = getattr(settings, 'OPENROUTER_API_KEY', None)
+    if not openrouter_api_key:
+        logger.error("OPENROUTER_API_KEY not configured for image processing")
+        return "[Image processing failed: OpenRouter API key not configured]", 'image_vision_failed'
     
     s3_service = S3Service()
     
     # Read image from S3
-    response = s3_service.get_object(s3_key)
-    image_bytes = response['Body'].read()
-    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    try:
+        response = s3_service.get_object(s3_key)
+        image_bytes = response['Body'].read()
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Failed to read image from S3: {str(e)}")
+        return "[Image processing failed: Could not read file from storage]", 'image_vision_failed'
     
     # Determine media type from file extension
-    media_type = 'image/png' if s3_key.lower().endswith('.png') else 'image/jpeg'
+    if s3_key.lower().endswith('.png'):
+        media_type = 'image/png'
+    elif s3_key.lower().endswith('.gif'):
+        media_type = 'image/gif'
+    elif s3_key.lower().endswith('.webp'):
+        media_type = 'image/webp'
+    else:
+        media_type = 'image/jpeg'
     
     # Structured prompt for Markdown output
     prompt = """Analyze this image and extract all text, tables, and structural information.
@@ -70,51 +83,90 @@ Return your analysis in Markdown format, preserving:
 
 If the image contains no text, describe the scene, objects, and context in structured Markdown."""
     
-    request_body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 4096,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_base64}},
-                {"type": "text", "text": prompt}
-            ]
-        }]
+    # Vision-capable models in order of preference
+    vision_models = [
+        "openai/gpt-4o-mini",  # Fast and cost-effective with vision
+        "openai/gpt-4o",  # More capable with vision
+        "anthropic/claude-3.5-sonnet",  # High quality vision
+        "google/gemini-2.0-flash-exp",  # Google's vision model
+    ]
+    
+    # OpenRouter API endpoint
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/rag-chatbot",
+        "X-Title": "RAG Chatbot Image Processing"
     }
     
-    try:
-        response = bedrock_client.invoke_model(
-            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
-            body=json.dumps(request_body)
-        )
-        result = json.loads(response['body'].read())
-        markdown_text = result['content'][0]['text']
-        
-        # Failure policy: Empty vision response
-        if not markdown_text or markdown_text.strip() == "":
-            # Retry once with different prompt
-            retry_prompt = "Extract all visible text, tables, and structured content from this image. Format as Markdown."
-            request_body['messages'][0]['content'][1]['text'] = retry_prompt
-            retry_response = bedrock_client.invoke_model(
-                modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
-                body=json.dumps(request_body)
-            )
-            retry_result = json.loads(retry_response['body'].read())
-            markdown_text = retry_result['content'][0]['text']
+    last_error = None
+    
+    for model_id in vision_models:
+        try:
+            logger.info(f"[Image] Trying vision model: {model_id}")
             
-            if not markdown_text or markdown_text.strip() == "":
-                # Store with failure marker
-                markdown_text = "[Image processing failed: No content extracted]"
-                extraction_method = 'image_vision_failed'
+            # Build request with image
+            payload = {
+                "model": model_id,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{image_base64}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                    ]
+                }],
+                "max_tokens": 4096,
+                "temperature": 0.3,
+            }
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=120)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                if 'choices' in result and len(result['choices']) > 0:
+                    choice = result['choices'][0]
+                    if 'message' in choice and 'content' in choice['message']:
+                        markdown_text = choice['message']['content'].strip()
+                        
+                        if markdown_text and len(markdown_text) > 10:
+                            logger.info(f"[Image] Successfully processed with {model_id}, extracted {len(markdown_text)} chars")
+                            return markdown_text, 'image_vision'
+                        else:
+                            logger.warning(f"[Image] {model_id} returned empty/short response, trying next model...")
+                            continue
+                            
+            elif response.status_code == 429:
+                logger.warning(f"[Image] Rate limit for {model_id}, trying next model...")
+                continue
             else:
-                extraction_method = 'image_vision'
-        else:
-            extraction_method = 'image_vision'
-            
-        return markdown_text, extraction_method
-    except Exception as e:
-        logger.warning(f"Vision API error for {s3_key}: {str(e)}")
-        return "[Image processing failed: API error]", 'image_vision_failed'
+                error_data = response.json() if response.content else {}
+                error_msg = error_data.get('error', {}).get('message', f"HTTP {response.status_code}")
+                logger.warning(f"[Image] {model_id} failed: {error_msg}")
+                last_error = error_msg
+                continue
+                
+        except requests.exceptions.Timeout:
+            logger.warning(f"[Image] Timeout for {model_id}, trying next model...")
+            last_error = "Request timeout"
+            continue
+        except Exception as e:
+            logger.warning(f"[Image] Error with {model_id}: {str(e)}")
+            last_error = str(e)
+            continue
+    
+    # All models failed
+    logger.error(f"[Image] All vision models failed for {s3_key}. Last error: {last_error}")
+    return f"[Image processing failed: {last_error or 'All vision models failed'}]", 'image_vision_failed'
 
 
 def chunk_text(text: str, metadata: dict = None) -> List[dict]:

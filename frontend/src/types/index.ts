@@ -47,6 +47,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   file_ids: number[];
+  citations?: Citation[];
   created_at: string;
 }
 

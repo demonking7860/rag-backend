@@ -12,11 +12,18 @@ def generate_chat_response(
     user_message: str,
     user_id: int,
     file_ids: Optional[List[int]] = None,
-    conversation_history: Optional[List[dict]] = None
+    conversation_history: Optional[List[dict]] = None,
 ) -> dict:
-    """Generate chat response using RAG and Bedrock Claude."""
-    
-    logger.info(f"[Chat] Generating response for user {user_id}, file_ids: {file_ids}, message: {user_message[:50]}...")
+    """
+    Build a short answer based on the user's files.
+
+    This function:
+    - embeds the user question,
+    - fetches the most relevant chunks,
+    - calls the LLM through OpenRouter,
+    - and returns the answer plus simple file citations.
+    """
+    logger.info(f"[Chat] Generating response for user {user_id}, file_ids: {file_ids}")
     
     # Generate query embedding with retry
     query_embedding = None
@@ -109,7 +116,7 @@ def generate_chat_response(
     # Build context from chunks
     if chunks:
         context = "\n\n".join([f"[From {chunk['filename']}]: {chunk['text']}" for chunk in chunks])
-        logger.info(f"[Chat] Built context with {len(chunks)} chunks, context length: {len(context)} chars")
+        logger.info(f"[Chat] Built context with {len(chunks)} chunks")
     else:
         context = None
         logger.warning(f"[Chat] No chunks found for user {user_id}, file_ids: {file_ids}")
@@ -179,28 +186,24 @@ Format citations as: [filename] or [filename, page X] if page numbers are availa
         response_text = None
         last_error = None
         
-        # Try different models in order of preference
-        # OpenRouter provides access to many models - using reliable ones
+        # Try a small set of models in order of preference
         model_options = [
             "openai/gpt-4o-mini",  # Fast and cost-effective
             "openai/gpt-4o",  # More capable
             "anthropic/claude-3.5-sonnet",  # High quality
-            "google/gemini-2.0-flash-exp",  # Fast Google model
-            "meta-llama/llama-3.1-70b-instruct",  # Open source option
         ]
         
         for model_id in model_options:
             try:
                 logger.info(f"[Chat] Invoking OpenRouter model: {model_id}")
                 
-                # OpenRouter API endpoint
                 url = "https://openrouter.ai/api/v1/chat/completions"
                 
                 headers = {
                     "Authorization": f"Bearer {openrouter_api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/your-repo",  # Optional: for tracking
-                    "X-Title": "RAG Chatbot"  # Optional: for tracking
+                    "HTTP-Referer": "https://github.com/student-rag-assignment",
+                    "X-Title": "File Chat RAG",
                 }
                 
                 payload = {

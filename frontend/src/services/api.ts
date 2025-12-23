@@ -188,6 +188,11 @@ class ApiClient {
     await this.client.delete(`/files/${fileId}/`);
   }
 
+  async updateFile(fileId: number, payload: Partial<Pick<FileAsset, 'filename' | 'metadata'>>): Promise<FileAsset> {
+    const response = await this.client.patch(`/files/${fileId}/update/`, payload);
+    return response.data;
+  }
+
   async retryFinalize(fileId: number): Promise<void> {
     await this.client.post(`/files/${fileId}/retry-finalize/`);
   }

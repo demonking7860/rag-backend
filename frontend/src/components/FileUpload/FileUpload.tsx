@@ -154,11 +154,12 @@ export default function FileUpload({ onUploadComplete, onError }: FileUploadProp
   return (
     <div className="w-full">
       <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-          dragActive
-            ? 'border-indigo-500 bg-indigo-50'
-            : 'border-gray-300 hover:border-gray-400'
-        } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+        className={`flex flex-col items-center justify-center h-40 border-2 border-dashed rounded-xl text-center
+                  transition-colors duration-150 cursor-pointer ${
+                    dragActive
+                      ? 'border-indigo-500 bg-indigo-50'
+                      : 'border-gray-300 bg-gray-50 hover:border-indigo-400 hover:bg-indigo-50'
+                  } ${uploading ? 'opacity-60 pointer-events-none' : ''}`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
@@ -172,12 +173,9 @@ export default function FileUpload({ onUploadComplete, onError }: FileUploadProp
           accept=".pdf,.txt,.docx,.png,.jpeg,.jpg"
           disabled={uploading}
         />
-        <label
-          htmlFor="file-upload"
-          className="cursor-pointer flex flex-col items-center"
-        >
+        <label htmlFor="file-upload" className="flex flex-col items-center w-full h-full justify-center">
           <svg
-            className="w-12 h-12 text-gray-400 mb-4"
+            className="w-10 h-10 text-gray-400 mb-2"
             stroke="currentColor"
             fill="none"
             viewBox="0 0 48 48"
@@ -189,23 +187,24 @@ export default function FileUpload({ onUploadComplete, onError }: FileUploadProp
               strokeLinejoin="round"
             />
           </svg>
-          <span className="text-sm text-gray-600">
-            {uploading ? 'Uploading...' : 'Drag and drop a file here, or click to select'}
+          <span className="text-sm text-gray-700">
+            {uploading ? 'Uploading…' : 'Drag & drop a file here, or click to select'}
           </span>
-          <span className="text-xs text-gray-500 mt-2">
-            PDF, TXT, DOCX, PNG, JPEG (max 10MB)
+          <span className="mt-1 text-xs text-gray-500">
+            PDF, DOCX, TXT, PNG, JPG, JPEG • Max 10MB
           </span>
         </label>
       </div>
+
       {uploading && (
-        <div className="mt-4">
+        <div className="mt-3">
           <div className="bg-gray-200 rounded-full h-2">
             <div
               className="bg-indigo-600 h-2 rounded-full transition-all"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <p className="text-sm text-gray-600 mt-2 text-center">{Math.round(progress)}%</p>
+          <p className="text-xs text-gray-600 mt-1 text-center">{Math.round(progress)}%</p>
         </div>
       )}
     </div>
