@@ -3,15 +3,7 @@ set -e
 
 echo "Starting Django application..."
 
-# Wait for PostgreSQL to be ready
-echo "Waiting for PostgreSQL..."
-until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do
-  sleep 1
-done
-
-echo "PostgreSQL is ready!"
-
-# Check pgvector extension
+# Check and create pgvector extension if needed
 echo "Checking pgvector extension..."
 python << EOF
 import os
@@ -22,20 +14,31 @@ django.setup()
 
 from django.db import connection
 
-with connection.cursor() as cursor:
-    cursor.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector');")
-    exists = cursor.fetchone()[0]
-    
-    if not exists:
-        print("ERROR: pgvector extension not found!")
-        print("Please install pgvector extension in your PostgreSQL database.")
-        sys.exit(1)
-    else:
-        print("✓ pgvector extension found")
+try:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector');")
+        exists = cursor.fetchone()[0]
+        
+        if not exists:
+            print("WARNING: pgvector extension not found!")
+            print("Attempting to create pgvector extension...")
+            try:
+                cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                connection.commit()
+                print("✓ pgvector extension created successfully")
+            except Exception as e:
+                print(f"ERROR: Could not create pgvector extension: {e}")
+                print("Please ensure pgvector is installed in your PostgreSQL database.")
+                sys.exit(1)
+        else:
+            print("✓ pgvector extension found")
+except Exception as e:
+    print(f"WARNING: Could not check pgvector: {e}")
+    print("Continuing anyway - ensure pgvector is enabled in your database")
 EOF
 
 if [ $? -ne 0 ]; then
-    echo "CRITICAL: pgvector extension validation failed"
+    echo "CRITICAL: pgvector extension setup failed"
     exit 1
 fi
 
